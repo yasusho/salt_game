@@ -81,7 +81,10 @@ function dispatch(action, payload) {
     if (p2pMode && p2pConn && p2pConn.open) {
         const playerActions = ['HIT_CARD', 'STAND', 'PLACE_DROP', 'BUY_DRAFT', 'PASS_DRAFT', 'SUBMIT_DISCARD'];
         if (playerActions.includes(action)) {
-            const activePlayer = state.players[state.activePlayerIdx];
+            let activePlayer = state.players[state.activePlayerIdx];
+            if (action === 'SUBMIT_DISCARD' && payload && payload.player) {
+                activePlayer = payload.player;
+            }
             if (activePlayer) {
                 let isMyControl = false;
                 if (p2pRole === 'host') {
@@ -128,6 +131,9 @@ function dispatch(action, payload) {
             state.players.forEach((p, idx) => {
                 p.startOrder = idx; p.id = idx;
                 p.isAI = (p.name !== "あなた" && p.name !== "対戦相手");
+                if (p2pMode && p2pRole === 'host' && p.name === "あなた") {
+                    p2pMyPlayerIdx = p.id;
+                }
                 p.pos = 13;
                 
                 // Assign colors dynamically based on their names
@@ -210,11 +216,16 @@ function dispatch(action, payload) {
             if (sum >= 11) {
                 if(window.sound) sound.burst();
                 log("💥 <b>バースト！</b>", "warn");
+                triggerScreenEffect('burst');
                 if (!p.isAI) {
                     state.outwardSubPhase = "burst_select_2";
                     state.selectedDropCards = [];
                     state.droppedThisBurst = [];
-                    showBurstDropUI();
+                    if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                        state.actionMessage = `対戦相手がバースト処理中...`; state.actionMessageIsAlert = true;
+                    } else {
+                        showBurstDropUI();
+                    }
                 } else {
                     state.actionMessage = `${p.name} がバーストしました。`; state.actionMessageIsAlert = true;
                     renderAll();
@@ -222,8 +233,13 @@ function dispatch(action, payload) {
                 }
             } else {
                 if (!p.isAI) {
-                    state.actionMessage = `[合計:${sum}] 完了して手札にするか、さらにめくりますか？`;
-                    state.actionMessageIsAlert = false;
+                    if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                        state.actionMessage = `対戦相手が考え中... [合計:${sum}]`;
+                        state.actionMessageIsAlert = false;
+                    } else {
+                        state.actionMessage = `[合計:${sum}] 完了して手札にするか、さらにめくりますか？`;
+                        state.actionMessageIsAlert = false;
+                    }
                 } else {
                     setTimeout(() => dispatch('AI_DECIDE_DRAW'), 1000);
                 }
@@ -254,23 +270,40 @@ function dispatch(action, payload) {
                 state.selectedDropCards = [...state.drawnCards];
                 state.droppedThisBurst = [];
                 state.outwardSubPhase = "stand_select_place";
-                state.actionMessage = `<b>【ステップ 2/2】</b> 設置するマスを、下の「街道の状況」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                    state.actionMessage = `対戦相手が設置場所を選んでいます...`; state.actionMessageIsAlert = true;
+                } else {
+                    state.actionMessage = `<b>【ステップ 2/2】</b> 設置するマスを、下の「街道の状況」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                }
             } else {
                 state.selectedDropCards = [];
                 state.droppedThisBurst = [];
                 state.outwardSubPhase = "stand_select_1";
-                state.actionMessage = `<b>【ステップ 1/2】</b> 街道に残す（設置する）カードを、下の「めくったカード」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                    state.actionMessage = `対戦相手が設置カードを選んでいます...`; state.actionMessageIsAlert = true;
+                } else {
+                    state.actionMessage = `<b>【ステップ 1/2】</b> 街道に残す（設置する）カードを、下の「めくったカード」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                }
             }
             break;
         }
         case 'SELECT_DROP_CARD': {
             state.selectedDropCards = [payload.card];
+            const p = state.players[state.activePlayerIdx];
             if (state.outwardSubPhase === "burst_select_2") {
                 const dropNum = state.droppedThisBurst.length + 1;
-                state.actionMessage = `<b>【ステップ 2/2】</b> 選択したカードを落とすマスを、下の「街道の状況」からタップして選んでください（${dropNum}枚目）。`; state.actionMessageIsAlert = true;
+                if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                    state.actionMessage = `対戦相手が設置場所を選んでいます（${dropNum}枚目）...`; state.actionMessageIsAlert = true;
+                } else {
+                    state.actionMessage = `<b>【ステップ 2/2】</b> 選択したカードを落とすマスを、下の「街道の状況」からタップして選んでください（${dropNum}枚目）。`; state.actionMessageIsAlert = true;
+                }
                 state.outwardSubPhase = "burst_select_place";
             } else if (state.outwardSubPhase === "stand_select_1") {
-                state.actionMessage = `<b>【ステップ 2/2】</b> 選択したカードを設置するマスを、下の「街道の状況」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                    state.actionMessage = `対戦相手が設置場所を選んでいます...`; state.actionMessageIsAlert = true;
+                } else {
+                    state.actionMessage = `<b>【ステップ 2/2】</b> 選択したカードを設置するマスを、下の「街道の状況」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                }
                 state.outwardSubPhase = "stand_select_place";
             }
             break;
@@ -299,12 +332,20 @@ function dispatch(action, payload) {
             if (state.droppedThisBurst.length < targetDrops) {
                 if (state.drawnCards.length <= 1) {
                     state.selectedDropCards = [state.drawnCards[0]];
-                    state.actionMessage = `<b>【ステップ 2/2】</b> 2枚目を落とすマスを、下の「街道の状況」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                    if (p2pMode && state.players[state.activePlayerIdx].id !== p2pMyPlayerIdx) {
+                        state.actionMessage = `対戦相手が2枚目の落とすマスを選んでいます...`; state.actionMessageIsAlert = true;
+                    } else {
+                        state.actionMessage = `<b>【ステップ 2/2】</b> 2枚目を落とすマスを、下の「街道の状況」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                    }
                     state.outwardSubPhase = "burst_select_place";
                 } else {
                     state.selectedDropCards = [];
                     state.outwardSubPhase = "burst_select_2";
-                    state.actionMessage = `<b>【ステップ 1/2】</b> 2枚目の落とすカードを、下の「めくったカード」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                    if (p2pMode && state.players[state.activePlayerIdx].id !== p2pMyPlayerIdx) {
+                        state.actionMessage = `対戦相手が2枚目の落とすカードを選んでいます...`; state.actionMessageIsAlert = true;
+                    } else {
+                        state.actionMessage = `<b>【ステップ 1/2】</b> 2枚目の落とすカードを、下の「めくったカード」からタップして選んでください。`; state.actionMessageIsAlert = true;
+                    }
                 }
             } else {
                 state.actionMessage = "";
@@ -387,7 +428,11 @@ function dispatch(action, payload) {
                     setTimeout(() => dispatch('AI_DRAFT'), 1000);
                 }
             } else {
-                state.actionMessage = `マーケットから塩を買うか、パスしてください。`; state.actionMessageIsAlert = false;
+                if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                    state.actionMessage = `対戦相手の取引を待っています...`; state.actionMessageIsAlert = false;
+                } else {
+                    state.actionMessage = `マーケットから塩を買うか、パスしてください。`; state.actionMessageIsAlert = false;
+                }
             }
             break;
         }
@@ -438,21 +483,23 @@ function dispatch(action, payload) {
                 return;
             }
 
-            const realPlayer = state.players.find(p => !p.isAI && p.alive && !p.escaped);
-            if (realPlayer) {
-                // If in P2P mode, check if this local player is me
-                let isMe = true;
-                if (p2pMode) {
-                    isMe = (realPlayer.id === p2pMyPlayerIdx);
-                }
-                if (isMe) {
-                    state.actionMessage = `移動プロット：進むカードを選んでください。`; state.actionMessageIsAlert = false;
-                    openPlotModal(realPlayer);
-                } else {
-                    state.actionMessage = `対戦相手のプロットを待っています...`; state.actionMessageIsAlert = false;
-                }
+            let myPlayer = null;
+            if (p2pMode) {
+                myPlayer = state.players.find(p => p.id === p2pMyPlayerIdx && p.alive && !p.escaped);
             } else {
-                state.actionMessage = `解決中...`; state.actionMessageIsAlert = false;
+                myPlayer = state.players.find(p => !p.isAI && p.alive && !p.escaped);
+            }
+
+            if (myPlayer) {
+                state.actionMessage = `移動プロット：進むカードを選んでください。`; state.actionMessageIsAlert = false;
+                openPlotModal(myPlayer);
+            } else {
+                const anyAlive = state.players.some(p => p.alive && !p.escaped);
+                if (anyAlive && p2pMode) {
+                    state.actionMessage = `対戦相手のプロットを待っています...`; state.actionMessageIsAlert = false;
+                } else {
+                    state.actionMessage = `解決中...`; state.actionMessageIsAlert = false;
+                }
             }
             
             state.players.forEach(p => {
@@ -649,7 +696,12 @@ function dispatch(action, payload) {
                 if (targetCard.id === 'nara') {
                     log(`💥 ならず者の罠！`, "warn");
                     if(window.sound) sound.explosion();
+                    triggerScreenEffect('nara');
                     if (!p.isAI) {
+                        if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                            state.actionMessage = `対戦相手が罠の処理中...`; state.actionMessageIsAlert = true;
+                            return;
+                        }
                         state.actionMessage = `罠を踏みました！ 身代わりを捨ててください。`; state.actionMessageIsAlert = true;
                         openDiscardModal(p);
                         return; // stops loop until user answers
@@ -1026,10 +1078,19 @@ function updatePlayerStatus() {
             handDiv.innerHTML = `<span class="text-[10px] text-slate-300 font-medium flex items-center h-full">手札なし</span>`;
         } else {
             p.hand.slice().sort((a,b)=>a.val-b.val).forEach(c => {
-                const style = getCardStyle(c.id);
                 const el = document.createElement("div");
-                el.className = `hand-card-mini ${style.color}`;
-                el.innerHTML = `<span title="${style.name}" class="text-[11px]">${style.icon}</span>`;
+                let isMe = false;
+                if (p2pMode) isMe = (p.id === p2pMyPlayerIdx);
+                else isMe = !p.isAI;
+                
+                if (!isMe) {
+                    el.className = `hand-card-mini bg-slate-800 rounded-sm`;
+                    el.innerHTML = ``;
+                } else {
+                    const style = getCardStyle(c.id);
+                    el.className = `hand-card-mini ${style.color}`;
+                    el.innerHTML = `<span title="${style.name}" class="text-[11px]">${style.icon}</span>`;
+                }
                 handDiv.appendChild(el);
             });
         }
@@ -1055,7 +1116,7 @@ function updateNohinPool() {
     
     state.nohinPool.forEach((card, idx) => {
         const p = state.players[state.activePlayerIdx];
-        const isMyTurn = (state.currentPhase === 2 && !p.isAI);
+        const isMyTurn = (state.currentPhase === 2 && !p.isAI && (!p2pMode || p.id === p2pMyPlayerIdx));
         const canAffordCard = canAfford(p, card);
         const canInteract = isMyTurn && canAffordCard;
 
@@ -1103,7 +1164,7 @@ function updateRoadView() {
     if(state.players.length === 0) return;
 
     const p = state.players[state.activePlayerIdx];
-    const isDropping = (state.currentPhase === 1 && !p.isAI && (state.outwardSubPhase === "burst_select_place" || state.outwardSubPhase === "stand_select_place"));
+    const isDropping = (state.currentPhase === 1 && !p.isAI && (!p2pMode || p.id === p2pMyPlayerIdx) && (state.outwardSubPhase === "burst_select_place" || state.outwardSubPhase === "stand_select_place"));
 
     const boardContainer = document.getElementById("road-board-container");
     if (boardContainer) {
@@ -1191,8 +1252,8 @@ function updateTempDrawArea() {
     }
     
     const p = state.players[state.activePlayerIdx];
-    const isBurstSelecting = (state.currentPhase === 1 && !p.isAI && state.outwardSubPhase === "burst_select_2");
-    const isStandSelecting = (state.currentPhase === 1 && !p.isAI && state.outwardSubPhase === "stand_select_1");
+    const isBurstSelecting = (state.currentPhase === 1 && !p.isAI && (!p2pMode || p.id === p2pMyPlayerIdx) && state.outwardSubPhase === "burst_select_2");
+    const isStandSelecting = (state.currentPhase === 1 && !p.isAI && (!p2pMode || p.id === p2pMyPlayerIdx) && state.outwardSubPhase === "stand_select_1");
 
     if (isBurstSelecting || isStandSelecting) {
         tempArea.className = "bg-indigo-50/50 p-4 rounded shadow-md flex flex-col items-center gap-3 z-10 ring-4 ring-indigo-500/20";
@@ -1486,7 +1547,6 @@ function handleIncomingP2PData(data) {
     if (data.type === 'SYNC_INIT') {
         p2pMode = true;
         p2pRole = 'guest';
-        p2pMyPlayerIdx = 1;
         
         state.deck = data.state.deck;
         state.nohinDeck = data.state.nohinDeck;
@@ -1520,12 +1580,17 @@ function handleIncomingP2PData(data) {
         const modal = document.getElementById("setup-modal");
         if (modal) modal.classList.add("hidden");
         
-        const me = state.players.find(p => p.id === 1);
-        if (me) me.name = "あなた";
-        const host = state.players.find(p => p.id === 0);
+        const host = state.players.find(p => p.name === "あなた");
         if (host) host.name = "対戦相手(ホスト)";
         
+        const me = state.players.find(p => p.name === "対戦相手");
+        if (me) {
+            me.name = "あなた";
+            p2pMyPlayerIdx = me.id;
+        }
+        
         renderAll();
+        startActivePlayerTurn();
     }
     else if (data.type === 'ACTION') {
         const prevP2PMode = p2pMode;
@@ -1636,3 +1701,36 @@ window.onload = () => {
         }
     }
 };
+
+function triggerScreenEffect(type) {
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 z-50 flex items-center justify-center pointer-events-none transition-opacity duration-300";
+    if (type === 'burst') {
+        overlay.innerHTML = `<div class="bg-rose-600/60 absolute inset-0 mix-blend-multiply"></div>
+                             <div class="relative text-white font-black text-6xl md:text-8xl drop-shadow-[0_0_20px_rgba(225,29,72,0.8)] transform scale-50 opacity-0 transition-all duration-300" id="effect-text">BURST!</div>`;
+    } else if (type === 'nara') {
+        overlay.innerHTML = `<div class="bg-slate-900/60 absolute inset-0 mix-blend-multiply"></div>
+                             <div class="relative text-white font-black text-5xl md:text-7xl drop-shadow-[0_0_20px_rgba(0,0,0,0.8)] transform scale-50 opacity-0 transition-all duration-300 flex flex-col items-center" id="effect-text"><span class="text-6xl mb-4">🗡️</span>罠発動!</div>`;
+    }
+    document.body.appendChild(overlay);
+    
+    // Animate in
+    setTimeout(() => {
+        const text = overlay.querySelector('#effect-text');
+        if (text) {
+            text.classList.remove("scale-50", "opacity-0");
+            text.classList.add("scale-110", "opacity-100");
+            
+            setTimeout(() => {
+                text.classList.remove("scale-110");
+                text.classList.add("scale-100");
+            }, 150);
+        }
+    }, 10);
+    
+    // Animate out and remove
+    setTimeout(() => {
+        overlay.classList.add("opacity-0");
+        setTimeout(() => overlay.remove(), 300);
+    }, 1200);
+}
