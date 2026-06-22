@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Yuji+Syuku&display=swap');
+        
+        .font-serif-jp {
+            font-family: 'Noto Serif JP', serif;
+        }
+        .font-yuji {
+            font-family: 'Yuji Syuku', serif;
+        }
+        
+        body {
+            background-color: #f1f5f9;
+        }
+
+        /* カスタムスクロールバー */
+        ::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #e2e8f0;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 3px;
+        }
+
+        /* 脈動するボタンアニメーション */
+        .pulse-active {
+            box-shadow: 0 0 0 0 rgba(194, 79, 60, 0.7);
+            animation: pulse-btn 1.6s infinite;
+        }
+        @keyframes pulse-btn {
+            70% { box-shadow: 0 0 0 8px rgba(194, 79, 60, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(194, 79, 60, 0); }
+        }
+
+        .animate-bounce-slow {
+            animation: bounce-slow 2s infinite;
+        }
+        @keyframes bounce-slow {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-3px); }
+        }

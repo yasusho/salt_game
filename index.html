@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>塩の道 - Simultaneous Bluff Survival Game</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PeerJS for WebRTC P2P -->
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f8fafc;
+            .hand-card-mini {
+            width: 20px;
+            height: 28px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.075);
+            background-color: #fff;
+        }
+        /* Custom scrollbar for a cleaner look */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col p-4 md:p-6 lg:p-8 select-none">
+    <!-- ヘッダー -->
+    <header class="max-w-[95%] w-full mx-auto flex justify-between items-center mb-6 pb-4">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight text-slate-800 flex items-center gap-2">
+                <span>塩の道</span>
+            </h1>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="toggleRulesModal(true)" class="px-4 py-2 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 text-xs font-semibold rounded shadow-md transition-all flex items-center gap-1.5">
+                <i data-lucide="book" class="w-3.5 h-3.5"></i> ルール
+            </button>
+            <button onclick="resetGame()" class="px-4 py-2 bg-white text-rose-500 hover:bg-rose-50 hover:text-rose-600 text-xs font-semibold rounded shadow-md transition-all flex items-center gap-1.5">
+                <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> 最初から
+            </button>
+        </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="max-w-[95%] w-full mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6 flex-grow">
+        
+        <!-- 左側：メインゲームエリア (3カラム) -->
+        <div class="lg:col-span-3 flex flex-col gap-6">
+            
+            <!-- 上部: フェイズと山札 -->
+            <div class="flex justify-between items-center pb-2">
+                <div id="current-phase-display" class="text-slate-800 font-bold text-base flex items-center gap-2">
+                    <div class="w-2.5 h-2.5 bg-indigo-500 rounded-full shadow-sm"></div>
+                    <span>ゲーム開始前</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div id="deck-count-display" class="text-xs font-bold text-slate-500 bg-white px-3 py-1.5 rounded-full shadow-md flex items-center gap-1">
+                        <i data-lucide="layers" class="w-3.5 h-3.5"></i> 山札 60
+                    </div>
+                </div>
+            </div>
+
+            <!-- アクションバー (統合された操作領域) -->
+            <div class="bg-white rounded-lg p-5 md:p-6 relative shadow-md overflow-hidden flex flex-col gap-4">
+                <div id="action-message" class="text-sm font-bold text-slate-800 flex items-center gap-2 z-10">
+                    あなたのアクションを待っています...
+                </div>
+
+                <!-- 往路でめくっている一時的なカード表示領域 -->
+                <div id="temp-draw-area" class="hidden bg-slate-50 p-4 rounded-md shadow-inner flex flex-col items-center gap-3 z-10">
+                    <div class="flex justify-between items-center w-full max-w-lg">
+                        <span id="temp-draw-title" class="text-xs font-bold text-slate-600">めくったカード</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-bold text-slate-400">合計</span>
+                            <span id="temp-sum" class="text-base font-black text-indigo-600 bg-white px-3 py-0.5 rounded shadow-md">0</span>
+                        </div>
+                    </div>
+                    <div id="temp-cards" class="flex gap-2 justify-center min-h-[85px] items-center flex-wrap">
+                        <!-- めくられたカードがここに並ぶ -->
+                    </div>
+                </div>
+
+                <!-- 操作ボタン群 -->
+                <div id="control-buttons" class="flex gap-3 flex-wrap z-10">
+                    <!-- 動的なボタンが挿入されます -->
+                </div>
+            </div>
+
+            <!-- 盤面：街道ボード -->
+            <div id="road-board-container" class="bg-white rounded-lg p-5 shadow-md transition-all">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <i data-lucide="map" class="w-4 h-4"></i> 街道の状況
+                </div>
+                <div class="relative flex items-center overflow-x-auto pb-2 scrollbar-thin w-full">
+                    <div id="road-grid" class="flex items-center gap-2 min-w-max relative px-1 py-1">
+                        <!-- ここに道のマス（0〜13）が動的に挿入される -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- マーケット（塩置き場） -->
+            <div class="bg-white rounded-lg p-5 shadow-md">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <i data-lucide="shopping-bag" class="w-4 h-4"></i> 取引所 (塩の購入)
+                </div>
+                <div id="nohin-container" class="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
+                    <!-- 納品カードがJSで生成される -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 右側：サイドバー (1カラム) -->
+        <div class="lg:col-span-1 flex flex-col gap-4">
+            
+            <!-- プレイヤーステータス -->
+            <div class="bg-white rounded-lg p-4 shadow-md flex flex-col gap-3">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                    <i data-lucide="users" class="w-4 h-4"></i> 参加者の状況
+                </div>
+                
+                <div id="player-status-container" class="flex flex-col gap-3">
+                    <!-- JSで動的に生成されます -->
+                </div>
+            </div>
+
+            <!-- ゲームログ -->
+            <div class="bg-white rounded-lg p-4 shadow-md flex-grow flex flex-col max-h-[300px] lg:max-h-[500px]">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex justify-between items-center">
+                    <span class="flex items-center gap-1.5"><i data-lucide="align-left" class="w-4 h-4"></i> 行動の記録</span>
+                    <button onclick="clearLog()" class="hover:text-slate-800 transition-colors cursor-pointer p-1">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+                <div id="game-log" class="flex-grow overflow-y-auto text-[11px] leading-relaxed space-y-1.5 text-slate-600 pr-2 scrollbar-thin font-mono">
+                    <p>ゲームの準備が整いました。</p>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- モーダル群 -->
+    
+    <!-- ルール解説モーダル -->
+    <div id="rules-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4 hidden">
+        <div class="bg-white max-w-md w-full rounded-lg shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4 border-b border-slate-200 pb-2">
+                <h2 class="text-lg font-bold text-slate-800">ルール解説</h2>
+                <button onclick="toggleRulesModal(false)" class="text-slate-500 hover:text-slate-800 transition-colors bg-slate-100 p-1.5 rounded">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="text-xs text-slate-600 space-y-4 leading-relaxed">
+                <p>詳細は rules.md またはルールブックを参照してください。</p>
+            </div>
+            <button onclick="toggleRulesModal(false)" class="w-full mt-6 py-2.5 bg-slate-900 text-white rounded font-bold text-xs hover:bg-slate-800 transition-colors">
+                閉じる
+            </button>
+        </div>
+    </div>
+
+    <!-- ライフ（捨札）選択モーダル -->
+    <div id="discard-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[80] flex items-center justify-center p-4 hidden">
+        <div class="bg-white max-w-sm w-full rounded-lg shadow-2xl p-6 text-center">
+            <h2 class="text-base font-bold text-slate-800 mb-2">ならず者の罠</h2>
+            <p class="text-xs text-slate-500 mb-6">
+                ダメージを受けました。身代わりにする手札を1枚選んで捨ててください。
+            </p>
+            <div id="discard-card-options" class="flex gap-2 justify-center flex-wrap max-h-[200px] overflow-y-auto">
+                <!-- プレイヤーの手札が並ぶ -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 復路プロット用モーダル -->
+    <div id="plot-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[70] flex items-center justify-center p-4 hidden">
+        <div class="bg-white max-w-sm w-full rounded-lg shadow-2xl p-6 text-center">
+            <h2 class="text-base font-bold text-slate-800 mb-2">移動の決定</h2>
+            <p class="text-xs text-slate-500 mb-6">
+                手札から1枚選び、進む歩数を決定してください。
+            </p>
+            <div id="plot-card-options" class="flex gap-2 justify-center flex-wrap max-h-[200px] overflow-y-auto">
+                <!-- プレイヤーの手札が並ぶ -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- ならず者(ワイルド)歩数選択モーダル -->
+    <div id="wild-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[90] flex items-center justify-center p-4 hidden">
+        <div class="bg-white max-w-sm w-full rounded-lg shadow-2xl p-6 text-center">
+            <h2 class="text-base font-bold text-slate-800 mb-2">歩数の宣言</h2>
+            <p class="text-xs text-slate-500 mb-6">
+                ならず者を使用しました。1、2、3のいずれかの歩数を選択してください。
+            </p>
+            <div id="wild-step-options" class="flex gap-3 justify-center">
+                <!-- 1, 2, 3 のボタンが並ぶ -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ゲーム終了結果モーダル -->
+    <div id="result-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4 hidden">
+        <div class="bg-white max-w-sm w-full rounded-lg shadow-2xl p-8 text-center">
+            <div class="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner">
+                <i data-lucide="flag" class="w-6 h-6 text-slate-800"></i>
+            </div>
+            <h2 class="text-xl font-bold text-slate-800 mb-6">対戦終了</h2>
+            
+            <div id="result-list" class="space-y-2 mb-8 text-left">
+                <!-- 結果リストがここに挿入されます -->
+            </div>
+ 
+            <button onclick="location.reload()" class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded transition-all text-sm shadow-md">
+                もう一度プレイする
+            </button>
+        </div>
+    </div>
+
+
+    <!-- プレイヤー設定モーダル -->
+    <div id="setup-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
+        <div class="bg-white max-w-sm w-full rounded-lg shadow-2xl p-6 text-center">
+            <div class="w-12 h-12 bg-slate-50 rounded flex items-center justify-center mx-auto mb-4 shadow-inner">
+                <i data-lucide="users" class="w-6 h-6 text-slate-800"></i>
+            </div>
+            <h2 class="text-xl font-bold text-slate-800 mb-2 font-serif-jp">塩の道</h2>
+            <p class="text-xs text-slate-500 mb-4">プレイ人数（あなた ＋ AI）を選択してください</p>
+            
+            <div class="grid grid-cols-4 gap-2 mb-5">
+                <button type="button" onclick="selectPlayerCount(2)" id="btn-pc-2" class="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded text-xs transition-all shadow-sm">2人</button>
+                <button type="button" onclick="selectPlayerCount(3)" id="btn-pc-3" class="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded text-xs transition-all shadow-sm">3人</button>
+                <button type="button" onclick="selectPlayerCount(4)" id="btn-pc-4" class="py-2 bg-indigo-600 text-white font-bold rounded text-xs transition-all shadow-md">4人</button>
+                <button type="button" onclick="selectPlayerCount(5)" id="btn-pc-5" class="py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold rounded text-xs transition-all shadow-sm">5人</button>
+            </div>
+            
+            <button onclick="confirmSetupAndStart()" id="btn-solo-start" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded transition-all text-xs shadow-md mb-4">
+                ローカルで対戦開始
+            </button>
+
+            <!-- P2P Section -->
+            <div class="border-t border-slate-100 pt-4 mt-4 text-left">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <i data-lucide="globe" class="w-3.5 h-3.5"></i> P2Pオンライン対戦
+                </h3>
+                
+                <div class="flex flex-col gap-2.5">
+                    <!-- Create Room -->
+                    <button onclick="p2pCreateRoom()" id="btn-p2p-host" class="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded text-xs transition-all flex items-center justify-center gap-1.5">
+                        <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>部屋を作って招待リンクをコピー
+                    </button>
+
+                    <!-- Join Room Input -->
+                    <div class="flex gap-1.5">
+                        <input type="text" id="p2p-room-input" placeholder="部屋IDを入力" class="flex-grow px-3 py-2 bg-slate-50 border border-slate-200 text-xs rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono">
+                        <button onclick="p2pJoinRoom()" id="btn-p2p-join" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded text-xs transition-all">
+                            参加
+                        </button>
+                    </div>
+
+                    <!-- Connection Status display -->
+                    <div id="p2p-status-box" class="hidden text-center p-2 rounded bg-slate-50 text-[10px] font-semibold text-slate-500 border border-slate-100 animate-pulse">
+                        未接続
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/constants.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/game.js"></script>
+    <script>
+        // Ensure lucide icons render
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    </script>
+</body>
+</html>
