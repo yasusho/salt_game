@@ -1,4 +1,5 @@
 // --- 状態 (State) ---
+let isSimulation = false;
 let state = {
     players: [],
     road: [],
@@ -34,6 +35,7 @@ class Player {
         this.alive = true;    
         this.escaped = false; 
         this.startOrder = id;
+        this.personality = 'balanced';
     }
     get score() { return this.nohin.reduce((sum, card) => sum + card.pts, 0); }
     getCardCounts() {
@@ -60,6 +62,7 @@ function calcCurrentSum(cards) { return Math.max(0, cards.reduce((s, c) => s + c
 
 // --- ユーティリティ ---
 function log(message, type = "info") {
+    if (isSimulation) return;
     const logBox = document.getElementById("game-log");
     const p = document.createElement("p");
     if (type === "system") p.className = "text-indigo-600 font-bold mt-1";
@@ -73,7 +76,15 @@ function log(message, type = "info") {
     logBox.scrollTop = logBox.scrollHeight;
 }
 
-function clearLog() { document.getElementById("game-log").innerHTML = ""; }
+function clearLog() {
+    if (isSimulation) return;
+    document.getElementById("game-log").innerHTML = "";
+}
+
+function delayDispatch(action, ms) {
+    if (isSimulation) dispatch(action);
+    else setTimeout(() => dispatch(action), ms);
+}
 
 // --- ロジックコア: Reducer/DSL Dispatcher ---
 function dispatch(action, payload) {
@@ -127,22 +138,32 @@ function dispatch(action, payload) {
                 state.players.push(allCandidates[i]);
             }
 
+            const personalities = ['aggressive', 'conservative', 'balanced'];
+            const colors = ["bg-blue-500", "bg-orange-400", "bg-emerald-400", "bg-purple-400", "bg-rose-400"];
             shuffle(state.players);
+            let aiCount = 1;
             state.players.forEach((p, idx) => {
                 p.startOrder = idx; p.id = idx;
                 p.isAI = (p.name !== "あなた" && p.name !== "対戦相手");
+                if (isSimulation) {
+                    p.isAI = true;
+                    p.name = `bot${idx + 1}`;
+                } else {
+                    if (p.isAI) {
+                        p.name = `bot${aiCount++}`;
+                    }
+                }
                 if (p2pMode && p2pRole === 'host' && p.name === "あなた") {
                     p2pMyPlayerIdx = p.id;
                 }
-                p.pos = 13;
                 
-                // Assign colors dynamically based on their names
-                if (p.name === "あなた") p.colorClass = "bg-blue-500";
-                else if (p.name === "オコジョ") p.colorClass = "bg-orange-400";
-                else if (p.name === "カモシカ") p.colorClass = "bg-emerald-400";
-                else if (p.name === "ツキノワ") p.colorClass = "bg-purple-400";
-                else if (p.name === "ホンドギツネ") p.colorClass = "bg-rose-400";
-                else if (p.name === "対戦相手") p.colorClass = "bg-orange-400"; // Guest uses Orange
+                // AIに毎ゲームランダムな性格を割り当てる
+                if (p.isAI) {
+                    p.personality = personalities[Math.floor(Math.random() * personalities.length)];
+                }
+
+                p.pos = 13;
+                p.colorClass = colors[idx % colors.length];
             });
             state.road = Array(14).fill().map(() => ({ faceUp: null, faceDown: [] }));
             state.deck = []; state.nohinPool = []; state.nohinDeck = [];
@@ -150,10 +171,10 @@ function dispatch(action, payload) {
             state.drawnCards = []; state.outwardSubPhase = "draw"; state.discardPile = []; state.passedPlayers = [];
             state.plotCards = {}; state.wildDecisions = {}; state.turnOrder = []; state.currentTurnIndex = 0;
 
-            for (let i = 0; i < 24; i++) state.deck.push({ ...CARD_TYPES.KOME });
-            for (let i = 0; i < 18; i++) state.deck.push({ ...CARD_TYPES.CHA });
-            for (let i = 0; i < 12; i++) state.deck.push({ ...CARD_TYPES.NUNO });
-            for (let i = 0; i < 6; i++)  state.deck.push({ ...CARD_TYPES.NARA });
+            for (let i = 0; i < 22; i++) state.deck.push({ ...CARD_TYPES.KOME });
+            for (let i = 0; i < 16; i++) state.deck.push({ ...CARD_TYPES.CHA });
+            for (let i = 0; i < 10; i++) state.deck.push({ ...CARD_TYPES.NUNO });
+            for (let i = 0; i < 12; i++) state.deck.push({ ...CARD_TYPES.NARA });
             shuffle(state.deck);
 
             for (let i = 1; i <= 12; i++) state.road[i].faceUp = state.deck.pop();
@@ -229,7 +250,7 @@ function dispatch(action, payload) {
                 } else {
                     state.actionMessage = `${p.name} がバーストしました。`; state.actionMessageIsAlert = true;
                     renderAll();
-                    setTimeout(() => dispatch('AI_BURST_HANDLE'), 1200);
+                    delayDispatch('AI_BURST_HANDLE', 1200);
                 }
             } else {
                 if (!p.isAI) {
@@ -241,7 +262,7 @@ function dispatch(action, payload) {
                         state.actionMessageIsAlert = false;
                     }
                 } else {
-                    setTimeout(() => dispatch('AI_DECIDE_DRAW'), 1000);
+                    delayDispatch('AI_DECIDE_DRAW', 1000);
                 }
             }
             break;
@@ -249,6 +270,13 @@ function dispatch(action, payload) {
         case 'STAND': {
             const p = state.players[state.activePlayerIdx];
             if(window.sound) sound.stand();
+            
+            // ボーナスとして1枚追加で引く
+            const bonusCard = drawCard();
+            if (bonusCard) {
+                state.drawnCards.push(bonusCard);
+                log(`🎁 ストップボーナス：山札から追加で1枚引きました（${bonusCard.icon}）。ここから設置する1枚を選びます。`, "system");
+            }
             
             if (p.isAI) {
                 if (state.drawnCards.length > 0) {
@@ -375,7 +403,7 @@ function dispatch(action, payload) {
                 let activeCandidates = [...state.players];
                 activeCandidates.sort((a, b) => {
                     if (a.hand.length !== b.hand.length) return a.hand.length - b.hand.length;
-                    return a.startOrder - b.startOrder;
+                    return Math.random() - 0.5;
                 });
                 let firstPlayer = activeCandidates[0];
                 state.turnOrder = [];
@@ -425,7 +453,7 @@ function dispatch(action, payload) {
             if (p.isAI) {
                 state.actionMessage = `${p.name} が取引を検討中...`; state.actionMessageIsAlert = false;
                 if (!(p2pMode && p2pRole === 'guest')) {
-                    setTimeout(() => dispatch('AI_DRAFT'), 1000);
+                    delayDispatch('AI_DRAFT', 1000);
                 }
             } else {
                 if (p2pMode && p.id !== p2pMyPlayerIdx) {
@@ -439,13 +467,17 @@ function dispatch(action, payload) {
         case 'BUY_DRAFT': {
             const idx = payload.idx;
             const p = state.players[state.activePlayerIdx];
-            const card = state.nohinPool.splice(idx, 1)[0];
+            const card = state.nohinPool[idx];
             
             payCostFromHand(p, card.req);
             p.nohin.push(card);
             log(`塩 [${card.pts}pt] を購入しました。`);
             
-            if (state.nohinDeck.length > 0) state.nohinPool.push(state.nohinDeck.pop());
+            if (state.nohinDeck.length > 0) {
+                state.nohinPool[idx] = state.nohinDeck.pop();
+            } else {
+                state.nohinPool.splice(idx, 1);
+            }
             state.boughtThisTurn = true;
             state.currentTurnIndex = (state.currentTurnIndex + 1) % state.players.length;
             dispatch('NEXT_DRAFT_TURN');
@@ -472,7 +504,7 @@ function dispatch(action, payload) {
             let aliveCount = 0;
             state.players.forEach(p => {
                 if (p.alive && !p.escaped) {
-                    if (p.hand.length === 0) {
+                    if (p.hand.length === 0 && p.nohin.length === 0) {
                         p.alive = false;
                         log(`💀 ${p.name} 行き倒れ（脱落）`, "warn");
                     } else aliveCount++;
@@ -509,15 +541,22 @@ function dispatch(action, payload) {
                     }
                     
                     let chosenCardIdx = -1;
+                    let useNohin = false;
                     const distance = p.pos;
                     const sortedHand = p.hand.map((c, idx) => ({ card: c, originalIdx: idx })).sort((a, b) => a.card.val - b.card.val);
+                    const sortedNohin = p.nohin.map((c, idx) => ({ card: c, originalIdx: idx })).sort((a, b) => a.card.val - b.card.val);
 
-                    const reachingCard = sortedHand.find(item => {
+                    let reachingCard = sortedHand.find(item => {
                         let val = item.card.val;
                         if (item.card.id === 'nara') val = 5;
                         return val >= distance;
                     });
                     
+                    if (!reachingCard) {
+                        reachingCard = sortedNohin.find(item => item.card.val >= distance);
+                        if (reachingCard) useNohin = true;
+                    }
+
                     if (reachingCard) {
                         chosenCardIdx = reachingCard.originalIdx;
                     }
@@ -539,14 +578,43 @@ function dispatch(action, payload) {
                     }
 
                     if (chosenCardIdx === -1) {
-                        if (p.hand.length <= 3) {
-                            chosenCardIdx = sortedHand[0].originalIdx;
-                        } else {
-                            chosenCardIdx = sortedHand[sortedHand.length - 1].originalIdx;
+                        for (let item of sortedNohin) {
+                            const targetPos = p.pos - item.card.val;
+                            if (targetPos > 0 && targetPos < 13) {
+                                const targetCell = state.road[targetPos];
+                                if (targetCell.faceDown.length > 0) {
+                                    chosenCardIdx = item.originalIdx;
+                                    useNohin = true;
+                                    break;
+                                }
+                            }
                         }
                     }
 
-                    const played = p.hand.splice(chosenCardIdx, 1)[0];
+                    if (chosenCardIdx === -1) {
+                        if (p.hand.length > 0) {
+                            if (p.personality === 'aggressive') {
+                                // 強気：常に最大のカードを出して急ぐ
+                                chosenCardIdx = sortedHand[sortedHand.length - 1].originalIdx;
+                            } else if (p.personality === 'conservative') {
+                                // 慎重：常に最小のカードを出して様子を見る
+                                chosenCardIdx = sortedHand[0].originalIdx;
+                            } else {
+                                // 堅実：手札枚数に応じて使い分ける
+                                if (p.hand.length <= 3) {
+                                    chosenCardIdx = sortedHand[0].originalIdx;
+                                } else {
+                                    chosenCardIdx = sortedHand[sortedHand.length - 1].originalIdx;
+                                }
+                            }
+                        } else {
+                            chosenCardIdx = sortedNohin[0].originalIdx;
+                            useNohin = true;
+                        }
+                    }
+
+                    const played = useNohin ? p.nohin.splice(chosenCardIdx, 1)[0] : p.hand.splice(chosenCardIdx, 1)[0];
+                    if (useNohin) log(`${p.name} が特典（塩）を身代わりに移動しました`, "ai");
                     state.plotCards[p.id] = played;
                     
                     if (played.id === 'nara') {
@@ -583,8 +651,14 @@ function dispatch(action, payload) {
         case 'SUBMIT_PLOT': {
             const player = payload.player;
             const c = payload.card;
-            const idx = player.hand.findIndex(hc => hc.id === c.id);
-            const played = player.hand.splice(idx, 1)[0];
+            let played = null;
+            let idx = player.hand.findIndex(hc => hc.id === c.id);
+            if (idx !== -1) {
+                played = player.hand.splice(idx, 1)[0];
+            } else {
+                idx = player.nohin.findIndex(nc => nc.id === c.id);
+                if (idx !== -1) played = player.nohin.splice(idx, 1)[0];
+            }
             state.plotCards[player.id] = played;
             
             if (played.id === 'nara') {
@@ -624,7 +698,7 @@ function dispatch(action, payload) {
             if (allReady) {
                 state.actionMessage = `一斉解決します。`; state.actionMessageIsAlert = false;
                 renderAll();
-                setTimeout(() => dispatch('RESOLVE_PLOTS'), 800);
+                delayDispatch('RESOLVE_PLOTS', 800);
                 return;
             }
             break;
@@ -635,114 +709,184 @@ function dispatch(action, payload) {
             activePlayers.sort((a, b) => {
                 const ca = state.plotCards[a.id];
                 const cb = state.plotCards[b.id];
-                if (ca.sortVal !== cb.sortVal) return cb.sortVal - ca.sortVal; 
+                const caSort = ca.sortVal || getCardStyle(ca.id).sortVal;
+                const cbSort = cb.sortVal || getCardStyle(cb.id).sortVal;
+                if (caSort !== cbSort) return cbSort - caSort; 
                 if (a.pos !== b.pos) return b.pos - a.pos; 
-                return a.startOrder - b.startOrder;
+                return Math.random() - 0.5;
             });
             state.turnOrder = activePlayers;
-            state.currentTurnIndex = 0;
-            activePlayers.forEach(p => {
-                const c = state.plotCards[p.id];
-                let stepInfo = c.val;
-                if(c.id === 'nara') stepInfo = state.wildDecisions[p.id] + "（ワイルド）";
-                log(`${p.name}: ${c.icon} ${stepInfo}歩`);
-            });
+            
+            // EXECUTE_MOVE will now handle all players simultaneously
+            state.resolvingSpaces = null;
             dispatch('EXECUTE_MOVE');
             return;
         }
         case 'EXECUTE_MOVE': {
-            if (state.currentTurnIndex >= state.turnOrder.length) {
-                setTimeout(() => dispatch('START_PLOT'), 1000);
-                return;
-            }
-            const p = state.turnOrder[state.currentTurnIndex];
-            if (!p.alive || p.escaped) {
-                state.currentTurnIndex++;
-                dispatch('EXECUTE_MOVE');
-                return;
-            }
-            const c = state.plotCards[p.id];
-            let steps = c.val;
-            if (c.id === 'nara') steps = state.wildDecisions[p.id];
-            p.pos = Math.max(0, p.pos - steps);
-            log(`🏃 ${p.name} -> マス[${p.pos}]`, p.isAI ? "ai" : "p1");
-            if(window.sound) sound.step();
-            if (p.pos === 0) {
-                p.escaped = true;
-                log(`🎉 ${p.name} 生還！`, "success");
-                state.currentTurnIndex++;
+            if (!state.resolvingSpaces) {
+                // First step: Move all players simultaneously
+                state.turnOrder.forEach(p => {
+                    if (p.alive && !p.escaped) {
+                        const c = state.plotCards[p.id];
+                        let steps = c.val;
+                        if (c.id === 'nara') steps = state.wildDecisions[p.id];
+                        p.pos = Math.max(0, p.pos - steps);
+                        log(`🏃 ${p.name} -> マス[${p.pos}]`, p.isAI ? "ai" : "p1");
+                    }
+                });
+                if(window.sound) sound.step();
+                
+                // Identify spaces to resolve (from goal to start: 1 to 12)
+                const occupied = new Set();
+                state.turnOrder.forEach(p => {
+                    if (p.alive && !p.escaped && p.pos > 0) occupied.add(p.pos);
+                });
+                state.resolvingSpaces = Array.from(occupied).sort((a,b) => a - b);
+                
                 renderAll();
-                setTimeout(() => dispatch('EXECUTE_MOVE'), 800);
+                delayDispatch('RESOLVE_NEXT_SPACE', 1000);
                 return;
             }
-            dispatch('HANDLE_LANDING', { player: p });
-            return;
         }
-        case 'HANDLE_LANDING': {
-            const p = payload.player;
-            let collected = false;
-            let targetCard = null;
+        case 'RESOLVE_NEXT_SPACE': {
+            if (!state.resolvingSpaces || state.resolvingSpaces.length === 0) {
+                // Done resolving spaces. Check escapes.
+                state.turnOrder.forEach(p => {
+                    if (p.alive && !p.escaped && p.pos === 0) {
+                        p.escaped = true;
+                        log(`🎉 ${p.name} 生還！`, "success");
+                    }
+                });
+                state.resolvingSpaces = null;
+                renderAll();
+                delayDispatch('START_PLOT', 1000);
+                return;
+            }
 
-            if (state.road[p.pos].faceUp) {
-                targetCard = state.road[p.pos].faceUp;
-                state.road[p.pos].faceUp = null;
-                log(`マス[${p.pos}]の特産品を獲得：${targetCard.icon}`);
-            } else if (state.road[p.pos].faceDown.length > 0) {
-                targetCard = state.road[p.pos].faceDown.pop();
-                log(`マス[${p.pos}]の落とし物を獲得：${targetCard.icon}`);
+            const pos = state.resolvingSpaces.shift();
+            const playersAtPos = state.turnOrder.filter(p => p.alive && !p.escaped && p.pos === pos);
+
+            if (playersAtPos.length === 0) {
+                dispatch('RESOLVE_NEXT_SPACE');
+                return;
+            }
+
+            let targetCard = null;
+            if (state.road[pos].faceUp) {
+                targetCard = state.road[pos].faceUp;
+                state.road[pos].faceUp = null;
+            } else if (state.road[pos].faceDown.length > 0) {
+                targetCard = state.road[pos].faceDown.pop();
             }
 
             if (targetCard) {
-                if (targetCard.id === 'nara') {
-                    log(`💥 ならず者の罠！`, "warn");
-                    if(window.sound) sound.explosion();
-                    triggerScreenEffect('nara');
-                    if (!p.isAI) {
-                        if (p2pMode && p.id !== p2pMyPlayerIdx) {
-                            state.actionMessage = `対戦相手が罠の処理中...`; state.actionMessageIsAlert = true;
-                            return;
-                        }
-                        state.actionMessage = `罠を踏みました！ 身代わりを捨ててください。`; state.actionMessageIsAlert = true;
-                        openDiscardModal(p);
-                        return; // stops loop until user answers
-                    } else {
-                        if (p.hand.length > 0) {
-                            p.hand.sort((a,b) => a.val - b.val);
-                            const lost = p.hand.shift();
-                            log(`${p.name} は ${lost.name} を捨てた。`, "ai");
-                        }
-                    }
-                } else {
-                    if(window.sound) sound.coin();
-                    p.hand.push(targetCard);
-                }
-                collected = true;
-            }
-
-            if (collected) {
-                if (!state.road[p.pos].faceUp && state.road[p.pos].faceDown.length === 0) {
+                log(`マス[${pos}] のカードは [${getCardStyle(targetCard.id).name}] でした！`);
+                
+                // 即座に補充判定を行う
+                if (!state.road[pos].faceUp && state.road[pos].faceDown.length === 0) {
                     const replCard = drawCard();
                     if (replCard) {
-                        state.road[p.pos].faceDown.push(replCard);
-                        log(`マス[${p.pos}]が空いたため、山札から裏向きで1枚補充されました。`, "system");
+                        state.road[pos].faceDown.push(replCard);
+                        log(`マス[${pos}]が空いたため、山札から裏向きで1枚補充されました。`, "system");
+                    }
+                }
+
+                if (targetCard.id === 'nara') {
+                    log(`💥 ならず者の罠！ 同じマスにいる全員が被害を受けます！`, "warn");
+                    if(window.sound) sound.explosion();
+                    triggerScreenEffect('nara');
+                    state.discardPile.push(targetCard);
+                    
+                    state.trapVictims = [...playersAtPos];
+                    dispatch('PROCESS_TRAP_VICTIM');
+                    return;
+                } else {
+                    if (playersAtPos.length === 1) {
+                        const p = playersAtPos[0];
+                        log(`${p.name} が特産品を獲得！`, "success");
+                        if(window.sound) sound.coin();
+                        p.hand.push(targetCard);
+                    } else {
+                        log(`💥 バッティング！ 複数人が狙ったため資源は散逸しました。`, "warn");
+                        state.discardPile.push(targetCard);
                     }
                 }
             }
-            state.currentTurnIndex++;
+            
             renderAll();
-            setTimeout(() => dispatch('EXECUTE_MOVE'), 1000);
+            delayDispatch('RESOLVE_NEXT_SPACE', 1000);
             return;
         }
+        case 'PROCESS_TRAP_VICTIM': {
+            if (!state.trapVictims || state.trapVictims.length === 0) {
+                renderAll();
+                delayDispatch('RESOLVE_NEXT_SPACE', 1000);
+                return;
+            }
+
+            const p = state.trapVictims[0]; // peek
+            if (!p.isAI) {
+                if (p2pMode && p.id !== p2pMyPlayerIdx) {
+                    state.actionMessage = `対戦相手が罠の処理中...`; state.actionMessageIsAlert = true;
+                    return;
+                }
+                state.actionMessage = `罠を踏みました！ 身代わりを1枚捨ててください。`; state.actionMessageIsAlert = true;
+                state.pendingDiscards = 1;
+                openDiscardModal(p);
+                return; // stops loop until user answers
+            } else {
+                for (let i = 0; i < 1; i++) {
+                    if (p.hand.length > 0) {
+                        p.hand.sort((a,b) => a.val - b.val);
+                        const lost = p.hand.shift();
+                        state.discardPile.push(lost);
+                        log(`${p.name} は ${lost.name} を捨てた。`, "ai");
+                    } else if (p.nohin.length > 0) {
+                        p.nohin.sort((a,b) => a.val - b.val);
+                        const lost = p.nohin.shift();
+                        state.discardPile.push(lost);
+                        log(`${p.name} は 特典の ${getCardStyle(lost.id).name} を捨てた。`, "ai");
+                    }
+                }
+                state.trapVictims.shift();
+                dispatch('PROCESS_TRAP_VICTIM');
+                return;
+            }
+        }
         case 'SUBMIT_DISCARD': {
-            const { player, idx, card } = payload;
-            player.hand.splice(idx, 1);
-            log(`[${card.name}] を捨てました。`, "p1");
+            const { player, card } = payload;
+            let idx = player.hand.findIndex(hc => hc.id === card.id);
+            if (idx !== -1) {
+                const c = player.hand.splice(idx, 1)[0];
+                state.discardPile.push(c);
+            } else {
+                idx = player.nohin.findIndex(nc => nc.id === card.id);
+                if (idx !== -1) {
+                    const c = player.nohin.splice(idx, 1)[0];
+                    state.discardPile.push(c);
+                }
+            }
+            log(`[${getCardStyle(card.id).name}] を捨てました。`, "p1");
+            
+            if (state.pendingDiscards) state.pendingDiscards--;
+            
+            if (state.pendingDiscards > 0 && (player.hand.length > 0 || player.nohin.length > 0)) {
+                state.actionMessage = `残り ${state.pendingDiscards} 枚捨ててください。`; state.actionMessageIsAlert = true;
+                openDiscardModal(player);
+                return;
+            }
+            
+            state.pendingDiscards = 0;
             state.actionMessage = `解決中...`; state.actionMessageIsAlert = false;
-            state.currentTurnIndex++;
-            dispatch('EXECUTE_MOVE');
+            if (state.trapVictims && state.trapVictims.length > 0) state.trapVictims.shift();
+            dispatch('PROCESS_TRAP_VICTIM');
             return;
         }
         case 'END_GAME': {
+            if (isSimulation) {
+                recordSimulationStats();
+                return;
+            }
             state.currentPhase = 4;
             state.actionMessage = `ゲーム終了`; state.actionMessageIsAlert = false;
             log("<b>ゲーム終了</b>", "system");
@@ -800,6 +944,13 @@ function dispatch(action, payload) {
                     maxAcceptableBustProb = 0.60;
                 }
                 
+                // Apply personality modifiers
+                if (p.personality === 'aggressive') {
+                    maxAcceptableBustProb += 0.10; // 強気でも自滅しすぎない程度のリスク(+10%)
+                } else if (p.personality === 'conservative') {
+                    maxAcceptableBustProb -= 0.15; // 極めて安全第一(-15%)
+                }
+                
                 willHit = probOfBust <= maxAcceptableBustProb;
             }
 
@@ -808,20 +959,33 @@ function dispatch(action, payload) {
             return;
         }
         case 'AI_BURST_HANDLE': {
+            const p = state.players[state.activePlayerIdx];
             let drops = [];
             if (state.drawnCards.length <= 2) drops = [...state.drawnCards];
             else { shuffle(state.drawnCards); drops = [state.drawnCards[0], state.drawnCards[1]]; }
             
             drops.forEach(c => {
-                // Strategic drop placement:
-                // - naras (traps) placed in mid-sections (4-10) where players frequently land
-                // - goods placed closer to start (2, 4, 6, 8, 10, 12) for recovery
                 let pos;
                 if (c.id === 'nara') {
-                    pos = Math.floor(Math.random() * 7) + 4;
+                    if (p.personality === 'aggressive') {
+                        // 強気：ゴール手前の嫌な位置(8〜11)に置く
+                        pos = Math.floor(Math.random() * 4) + 8;
+                    } else if (p.personality === 'conservative') {
+                        // 慎重：自分が踏むリスクを減らすため遠く(10〜12)か序盤(1〜3)
+                        pos = Math.random() < 0.5 ? Math.floor(Math.random() * 3) + 1 : Math.floor(Math.random() * 3) + 10;
+                    } else {
+                        // 堅実：人がよく踏む中央(4〜10)
+                        pos = Math.floor(Math.random() * 7) + 4;
+                    }
                 } else {
-                    const goodSpots = [2, 4, 6, 8, 10, 12];
-                    pos = goodSpots[Math.floor(Math.random() * goodSpots.length)];
+                    if (p.personality === 'conservative') {
+                        // 慎重：確実にとれるように浅い位置(2,4)に置く
+                        const goodSpots = [2, 4];
+                        pos = goodSpots[Math.floor(Math.random() * goodSpots.length)];
+                    } else {
+                        const goodSpots = [2, 4, 6, 8, 10, 12];
+                        pos = goodSpots[Math.floor(Math.random() * goodSpots.length)];
+                    }
                 }
                 pos = Math.max(1, Math.min(12, pos));
                 state.road[pos].faceDown.push(c);
@@ -830,12 +994,11 @@ function dispatch(action, payload) {
             state.drawnCards.forEach(c => { if (!drops.includes(c)) state.discardPile.push(c); });
             state.drawnCards = [];
             
-            const p = state.players[state.activePlayerIdx];
             log(`💥 バーストの救済として「ならず者（ワイルド）」を1枚獲得しました。`, "ai");
             p.hand.push({ ...CARD_TYPES.NARA });
             
             renderAll();
-            setTimeout(() => dispatch('END_TURN'), 1000);
+            delayDispatch('END_TURN', 1000);
             return;
         }
         case 'AI_DRAFT': {
@@ -844,8 +1007,14 @@ function dispatch(action, payload) {
             state.nohinPool.forEach((c, idx) => { if (canAfford(p, c)) buyable.push({card: c, idx: idx}); });
 
             if (buyable.length > 0) {
-                // Sort by score/points descending
-                buyable.sort((a,b) => b.card.pts - a.card.pts);
+                // 性格によるソート
+                if (p.personality === 'conservative') {
+                    // 慎重：移動手札を残すため、なるべく安い（点数の低い）塩を好む
+                    buyable.sort((a,b) => a.card.pts - b.card.pts);
+                } else {
+                    // 強気・堅実：点数の高い塩を優先
+                    buyable.sort((a,b) => b.card.pts - a.card.pts);
+                }
                 
                 // Smarter check: Make sure buying doesn't leave the AI bankrupt on return.
                 let selectedTarget = null;
@@ -862,8 +1031,14 @@ function dispatch(action, payload) {
                     
                     const remainingHandCount = p.hand.length - estimatedCost;
                     
-                    // Keep at least 2 cards for movement, unless the card is high value (pts >= 5) or we have no salt yet
-                    if (remainingHandCount >= 2 || target.card.pts >= 5 || p.nohin.length === 0) {
+                    let minCardsToKeep = 2;
+                    if (p.personality === 'aggressive') minCardsToKeep = 1; // 強気でも最低1枚は残す（0枚は即死するため）
+                    if (p.personality === 'conservative') minCardsToKeep = 4; // 慎重は手札をたっぷり残す
+                    
+                    // まだ塩を1つも持っていない場合は妥協して買うが、絶対に「残り1枚」は死守する
+                    const isDesperate = (p.nohin.length === 0 && remainingHandCount >= 1);
+                    
+                    if (remainingHandCount >= minCardsToKeep || isDesperate) {
                         selectedTarget = target;
                         break;
                     }
@@ -877,7 +1052,7 @@ function dispatch(action, payload) {
                     log(`${p.name} が 塩 [${target.card.pts}pt] を購入。`, "ai");
                     if (state.nohinDeck.length > 0) state.nohinPool.push(state.nohinDeck.pop());
                     renderAll();
-                    setTimeout(() => dispatch('NEXT_DRAFT_TURN'), 800);
+                    delayDispatch('NEXT_DRAFT_TURN', 800);
                     return;
                 }
             }
@@ -910,7 +1085,7 @@ function startActivePlayerTurn() {
         state.actionMessage = `${p.name} が考え中...`; state.actionMessageIsAlert = false;
         renderAll();
         if (!(p2pMode && p2pRole === 'guest')) {
-            setTimeout(() => dispatch('AI_DECIDE_DRAW'), 800);
+            delayDispatch('AI_DECIDE_DRAW', 800);
         }
     } else {
         state.actionMessage = `あなたのターン：カードをめくりますか？`; state.actionMessageIsAlert = false;
@@ -997,6 +1172,7 @@ function payCostFromHand(player, req) {
 
 // --- レンダリング (UI描画) ---
 function renderAll() {
+    if (isSimulation) return;
     updateActionMessageUI();
     updatePlayerStatus();
     updateRoadView();
@@ -1006,6 +1182,7 @@ function renderAll() {
 }
 
 function updateActionMessageUI() {
+    if (isSimulation) return;
     const el = document.getElementById("action-message");
     if (!state.actionMessage) { el.classList.add("hidden"); return; }
     el.classList.remove("hidden"); el.innerHTML = state.actionMessage;
@@ -1150,9 +1327,9 @@ function updateNohinPool() {
                 <span class="text-[9px] font-bold text-slate-500 block leading-none mb-1.5">必要資源</span>
                 <div class="flex items-center justify-center flex-wrap gap-0.5">${reqHtml}</div>
             </div>
-            <div class="leading-none mt-2 flex items-baseline gap-0.5 text-slate-800">
-                <span class="text-lg font-bold">${card.pts}</span>
-                <span class="text-[10px] font-bold">点</span>
+            <div class="leading-none mt-2 flex justify-center items-baseline gap-2 text-slate-800 w-full">
+                <div><span class="text-lg font-bold">${card.pts}</span><span class="text-[10px] font-bold">点</span></div>
+                <div class="text-slate-500"><span class="text-sm font-bold">${card.val}</span><span class="text-[9px] font-bold">歩</span></div>
             </div>`;
         container.appendChild(el);
     });
@@ -1355,6 +1532,9 @@ function openPlotModal(player) {
     player.hand.forEach(c => {
         if (!seen.has(c.id)) { seen.add(c.id); uniqueCards.push(c); }
     });
+    player.nohin.forEach(c => {
+        if (!seen.has(c.id)) { seen.add(c.id); uniqueCards.push(c); }
+    });
     uniqueCards.forEach(c => {
         const style = getCardStyle(c.id);
         const btn = document.createElement("button");
@@ -1391,21 +1571,30 @@ function openDiscardModal(player) {
     const container = document.getElementById("discard-card-options");
     container.innerHTML = "";
     
-    if (player.hand.length === 0) {
+    if (player.hand.length === 0 && player.nohin.length === 0) {
         modal.classList.add("hidden");
         state.actionMessage = `手札がありません...`; state.actionMessageIsAlert = false;
         renderAll();
         state.currentTurnIndex++;
-        setTimeout(() => dispatch('EXECUTE_MOVE'), 800);
+        delayDispatch('EXECUTE_MOVE', 800);
         return;
     }
 
-    player.hand.forEach((c, idx) => {
+    const uniqueCards = [];
+    const seen = new Set();
+    player.hand.forEach(c => {
+        if (!seen.has(c.id)) { seen.add(c.id); uniqueCards.push(c); }
+    });
+    player.nohin.forEach(c => {
+        if (!seen.has(c.id)) { seen.add(c.id); uniqueCards.push(c); }
+    });
+
+    uniqueCards.forEach(c => {
         const style = getCardStyle(c.id);
         const btn = document.createElement("button");
         btn.onclick = () => {
             modal.classList.add("hidden");
-            dispatch('SUBMIT_DISCARD', { player, idx, card: c });
+            dispatch('SUBMIT_DISCARD', { player, card: c });
         };
         btn.className = `w-[60px] h-[85px] rounded flex flex-col items-center justify-center hover:scale-105 cursor-pointer transition-all shadow-md ${style.color}`;
         btn.innerHTML = `<span class="text-3xl">${style.icon}</span>`;
@@ -1703,6 +1892,7 @@ window.onload = () => {
 };
 
 function triggerScreenEffect(type) {
+    if (isSimulation) return;
     const overlay = document.createElement("div");
     overlay.className = "fixed inset-0 z-50 flex items-center justify-center pointer-events-none transition-opacity duration-300";
     if (type === 'burst') {

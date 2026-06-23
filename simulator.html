@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>塩の道 - AIシミュレーター</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Zen Maru Gothic', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 p-8">
+    <div class="max-w-4xl mx-auto bg-white p-6 rounded-lg shadow-md">
+        <h1 class="text-2xl font-bold mb-4 border-b pb-2 flex items-center gap-2">
+            <i data-lucide="cpu" class="w-6 h-6 text-indigo-600"></i> AIバランスシミュレーター
+        </h1>
+        
+        <div class="flex flex-wrap gap-4 items-center mb-6">
+            <div>
+                <label class="block text-sm font-bold text-slate-600 mb-1">プレイ人数</label>
+                <select id="sim-player-count" class="border rounded px-3 py-2 bg-slate-50 w-32">
+                    <option value="3">3人</option>
+                    <option value="4" selected>4人</option>
+                    <option value="5">5人</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-slate-600 mb-1">実行回数</label>
+                <select id="sim-count" class="border rounded px-3 py-2 bg-slate-50 w-32">
+                    <option value="100">100回</option>
+                    <option value="1000" selected>1000回</option>
+                    <option value="10000">10000回</option>
+                </select>
+            </div>
+            <div class="flex items-end h-[60px]">
+                <button onclick="startSimulationUI()" class="h-[42px] px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded shadow-md transition-all flex items-center gap-2">
+                    <i data-lucide="play" class="w-4 h-4"></i> シミュレーション実行
+                </button>
+            </div>
+            <div class="flex items-end h-[60px] ml-auto">
+                <a href="index.html" class="h-[42px] px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded flex items-center gap-2 transition-all">
+                    <i data-lucide="arrow-left" class="w-4 h-4"></i> ゲームに戻る
+                </a>
+            </div>
+        </div>
+        
+        <div id="sim-progress" class="hidden mb-6 p-4 bg-indigo-50 text-indigo-800 rounded font-bold border border-indigo-200">
+            <div class="flex items-center gap-3">
+                <i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>
+                <span>実行中... (<span id="sim-current">0</span> / <span id="sim-total">0</span>)</span>
+            </div>
+        </div>
+        
+        <div id="sim-results" class="hidden">
+            <h2 class="text-xl font-bold mb-5 flex items-center gap-2 border-b pb-2">
+                <i data-lucide="bar-chart-2" class="w-6 h-6 text-emerald-600"></i> シミュレーション結果
+            </h2>
+            <div id="sim-results-content"></div>
+        </div>
+        
+        <!-- Game logic requires some UI elements to exist to prevent null errors, even though we skip renderAll -->
+        <div id="game-log" class="hidden"></div>
+        <div id="setup-modal" class="hidden"></div>
+        <div id="result-modal" class="hidden"></div>
+    </div>
+
+    <!-- 依存ファイルの読み込み -->
+    <script src="js/constants.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/simulator.js"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
